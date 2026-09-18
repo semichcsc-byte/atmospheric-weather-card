@@ -1823,22 +1823,32 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
                 : (hasSubFormat ? `${value}${unit}` : (unit ? `${value} ${unit}` : `${value}`));
             if (button.sub_value_entity) {
                 const svResolved = this._resolveSensorValue(hass, button.sub_value_entity, button.sub_value_attribute);
-                let svFmt = svResolved.formatted;
-                let svUnit = hasSubFormat ? button.sub_value_format : svResolved.unit;
-                if (useFancyUnit && svResolved.sensor) {
-                    const attrs = svResolved.sensor.attributes;
-                    const attr = button.sub_value_attribute;
-                    const raw = attr ? attrs[attr] : svResolved.sensor.state;
-                    // HA's formatted text can already include the unit. Separate numeric
-                    // values from their metadata instead of parsing localized display text.
-                    if (raw != null && raw !== '' && !isNaN(parseFloat(raw)) && isFinite(raw)) {
-                        svFmt = this._formatNumber(raw);
-                        if (!hasSubFormat) svUnit = attr
+                const attr = button.sub_value_attribute;
+                const attrs = svResolved.sensor && svResolved.sensor.attributes;
+                const raw = svResolved.sensor && (attr ? attrs[attr] : svResolved.sensor.state);
+                const isNumeric = raw != null && raw !== '' && !isNaN(parseFloat(raw)) && isFinite(raw);
+                if (useFancyUnit && svResolved.haFormatted && isNumeric) {
+                    const toParts = attr ? hass.formatEntityAttributeValueToParts : hass.formatEntityStateToParts;
+                    if (typeof toParts === 'function') {
+                        // HA owns display precision, derived units and their localized order.
+                        const parts = attr ? toParts.call(hass, svResolved.sensor, attr) : toParts.call(hass, svResolved.sensor);
+                        subValue = hasSubFormat
+                            ? formatSubValue(parts.filter(p => p.type !== 'unit').map(p => p.value).join('').trim(), button.sub_value_format)
+                            : parts.map(p => p.type === 'unit' && p.value ? `<span class="fancy-unit">${p.value}</span>` : p.value).join('');
+                    } else {
+                        // Older HA versions cannot safely separate localized values and units.
+                        // Keep the full display rather than losing precision or guessing a unit.
+                        subValue = String(svResolved.formatted);
+                    }
+                } else {
+                    let svUnit = hasSubFormat ? button.sub_value_format : svResolved.unit;
+                    if (useFancyUnit && !hasSubFormat && isNumeric) {
+                        svUnit = attr
                             ? (attrs[`${attr}_unit`] || (_FC_UNIT_MAP[attr] && attrs[_FC_UNIT_MAP[attr]]) || _FC_UNIT_FALLBACK[attr] || attrs.unit_of_measurement || '')
                             : (attrs.unit_of_measurement || '');
                     }
+                    subValue = formatSubValue(svResolved.formatted, svUnit);
                 }
-                subValue = formatSubValue(svFmt, svUnit);
                 subValueSig = `sv:${button.sub_value_entity}|${button.sub_value_attribute || ''}|${subValue}`;
             } else if (isForecast && button.sub_value_attribute && fcEntry) {
                 const svRaw = fcEntry[button.sub_value_attribute];
