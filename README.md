@@ -26,6 +26,25 @@ entity: weather.home
 
 See the card's on-screen editor for the full option set (animations, layout, etc.).
 
+### Fancy units
+
+Set `fancy_unit: true` on a button to render smaller, raised units for both its
+main value and its sub-value (for example, forecast high and low temperatures).
+This applies to forecast attributes and `sub_value_entity` sensors, including
+units overridden with `sub_value_format`. Set `sub_value_format: ''` to hide the
+sub-value unit. With `fancy_unit` disabled or omitted, units remain inline.
+
+Sensor sub-values use Home Assistant's formatted value parts to preserve display
+precision, localized number formatting, and derived units (such as climate
+temperatures). On older Home Assistant versions without the value-parts API,
+native formatted sub-values remain unchanged and inline; `sub_value_format`
+overrides are not applied in fancy mode because the unit cannot be safely separated.
+
+### Tests
+
+Run the regression tests with Node.js 18 or newer: `node --test tests/*.test.cjs`.
+No dependencies are required.
+
 ## License
 
 MIT © shpongledsummer (original author). See [`LICENSE`](LICENSE).

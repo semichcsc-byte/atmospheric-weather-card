@@ -1082,7 +1082,8 @@ class AtmosphericWeatherCard extends HTMLElement {
             .buttons-row,
             .button-free { color: var(--awc-text-color); }
             .button-sub { display: block; font-size: var(--awc-sub-size, 0.78em); opacity: var(--awc-sub-opacity, 0.7); font-weight: var(--awc-sub-weight, 500); line-height: 1.2; white-space: var(--awc-sub-wrap, nowrap); overflow: var(--awc-sub-visible, hidden); text-overflow: var(--awc-sub-overflow, ellipsis); flex: 0 0 auto; min-width: 0; }
-            .button-val .fancy-unit { font-size: 0.55em; font-weight: 500; opacity: 0.7; vertical-align: baseline; position: relative; top: -0.45em; margin-left: 3px; }
+            .button-val .fancy-unit,
+            .button-sub .fancy-unit { font-size: 0.55em; font-weight: 500; opacity: 0.7; vertical-align: baseline; position: relative; top: -0.45em; margin-left: 3px; }
             .buttons-group { pointer-events: auto; width: var(--awc-row-width, auto); box-sizing: border-box; padding: var(--awc-container-padding, 0); }
             .buttons-group.has-row-wrap { width: var(--awc-row-width, auto); }
             .buttons-group.has-row-horizontal-scroll { height: var(--awc-row-height, auto); }
@@ -1187,7 +1188,8 @@ class AtmosphericWeatherCard extends HTMLElement {
             .button .button-val { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: inline-block; font-weight: var(--awc-button-value-weight, 700); opacity: var(--awc-button-value-opacity, 1); max-width: 100%; }
             .button .button-val,
             .button .button-name { text-shadow: var(--_button-no-bg-shadow, none); }
-            .button .button-val .fancy-unit { font-size: 0.55em; font-weight: 500; opacity: 0.7; vertical-align: baseline; position: relative; top: -0.45em; margin-left: 3px; }
+            .button .button-val .fancy-unit,
+            .button .button-sub .fancy-unit { font-size: 0.55em; font-weight: 500; opacity: 0.7; vertical-align: baseline; position: relative; top: -0.45em; margin-left: 3px; }
             /* Element-disabled states */
             .button.icon-only { gap: 0; }
             .button.no-icon .button-content { flex: 1 1 auto; }
@@ -1811,14 +1813,42 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
                 nameSig = `ns-fc:${button.name_attribute}|${button.name_format != null ? button.name_format : ''}|${name}`;
             }
         }
+        const useFancyUnit = button.fancy_unit === true;
         const showSubValue = button.hide_sub_value !== true && (button.sub_value_entity || button.sub_value_attribute);
         let subValue = '', subValueSig = '';
         if (showSubValue) {
             const hasSubFormat = button.sub_value_format !== undefined;
+            const formatSubValue = (value, unit) => useFancyUnit && unit
+                ? `${value}<span class="fancy-unit">${unit}</span>`
+                : (hasSubFormat ? `${value}${unit}` : (unit ? `${value} ${unit}` : `${value}`));
             if (button.sub_value_entity) {
                 const svResolved = this._resolveSensorValue(hass, button.sub_value_entity, button.sub_value_attribute);
-                const svUnit = hasSubFormat ? button.sub_value_format : svResolved.unit;
-                subValue = hasSubFormat ? `${svResolved.formatted}${svUnit}` : (svUnit ? `${svResolved.formatted} ${svUnit}` : `${svResolved.formatted}`);
+                const attr = button.sub_value_attribute;
+                const attrs = svResolved.sensor && svResolved.sensor.attributes;
+                const raw = svResolved.sensor && (attr ? attrs[attr] : svResolved.sensor.state);
+                const isNumeric = raw != null && raw !== '' && !isNaN(parseFloat(raw)) && isFinite(raw);
+                if (useFancyUnit && svResolved.haFormatted && isNumeric) {
+                    const toParts = attr ? hass.formatEntityAttributeValueToParts : hass.formatEntityStateToParts;
+                    if (typeof toParts === 'function') {
+                        // HA owns display precision, derived units and their localized order.
+                        const parts = attr ? toParts.call(hass, svResolved.sensor, attr) : toParts.call(hass, svResolved.sensor);
+                        subValue = hasSubFormat
+                            ? formatSubValue(parts.filter(p => p.type !== 'unit').map(p => p.value).join('').trim(), button.sub_value_format)
+                            : parts.map(p => p.type === 'unit' && p.value ? `<span class="fancy-unit">${p.value}</span>` : p.value).join('');
+                    } else {
+                        // Older HA versions cannot safely separate localized values and units.
+                        // Keep the full display rather than losing precision or guessing a unit.
+                        subValue = String(svResolved.formatted);
+                    }
+                } else {
+                    let svUnit = hasSubFormat ? button.sub_value_format : svResolved.unit;
+                    if (useFancyUnit && !hasSubFormat && isNumeric) {
+                        svUnit = attr
+                            ? (attrs[`${attr}_unit`] || (_FC_UNIT_MAP[attr] && attrs[_FC_UNIT_MAP[attr]]) || _FC_UNIT_FALLBACK[attr] || attrs.unit_of_measurement || '')
+                            : (attrs.unit_of_measurement || '');
+                    }
+                    subValue = formatSubValue(svResolved.formatted, svUnit);
+                }
                 subValueSig = `sv:${button.sub_value_entity}|${button.sub_value_attribute || ''}|${subValue}`;
             } else if (isForecast && button.sub_value_attribute && fcEntry) {
                 const svRaw = fcEntry[button.sub_value_attribute];
@@ -1832,14 +1862,10 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
                             ? this._getFcFmt(lang, precision) : null;
                         svFmt = this._formatNumber(svRaw, fmt);
                     }
-                    if (hasSubFormat) {
-                        subValue = `${svFmt}${button.sub_value_format}`;
-                    } else {
-                        const _buttonState = hass.states[button.entity];
-                        const w = _buttonState && _buttonState.attributes;
-                        const svUnit = (w && w[`${button.sub_value_attribute}_unit`]) || (_FC_UNIT_MAP[button.sub_value_attribute] && w && w[_FC_UNIT_MAP[button.sub_value_attribute]]) || _FC_UNIT_FALLBACK[button.sub_value_attribute] || '';
-                        subValue = svUnit ? `${svFmt} ${svUnit}` : `${svFmt}`;
-                    }
+                    const _buttonState = hass.states[button.entity];
+                    const w = _buttonState && _buttonState.attributes;
+                    const svUnit = hasSubFormat ? button.sub_value_format : ((w && w[`${button.sub_value_attribute}_unit`]) || (_FC_UNIT_MAP[button.sub_value_attribute] && w && w[_FC_UNIT_MAP[button.sub_value_attribute]]) || _FC_UNIT_FALLBACK[button.sub_value_attribute] || '');
+                    subValue = formatSubValue(svFmt, svUnit);
                     subValueSig = `sv-fc:${button.sub_value_attribute}|${subValue}`;
                 }
             }
@@ -1868,7 +1894,7 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
                 ? `<span class="button-name awc-marquee-host" data-speed="${marqueeSpeed}" data-rtl="${marqueeRtl ? 1 : 0}"><span class="awc-marquee-track"><span class="awc-marquee-text">${name}</span></span></span>`
                 : `<span class="button-name">${name}</span>`)
             : '';
-        const useFancyUnit = button.fancy_unit === true; let inner;
+        let inner;
         if (useFancyUnit) {
             let fancyVal = formatted;
             let fancyUnitStr = unit;
