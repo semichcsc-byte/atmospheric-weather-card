@@ -594,9 +594,7 @@ class AtmosphericWeatherCard extends HTMLElement {
         this._handleWeatherChange(weatherState, hasNightChanged || hasDarkChanged);
     }
     static async getConfigElement() {
-        if (!customElements.get("atmospheric-weather-card-editor"))
-        { await import("./atmospheric-weather-card-editor.js?v=AWC-28062026"); }
-        return document.createElement("atmospheric-weather-card-editor");
+        return document.createElement(EDITOR_NAME);
     }
     static getStubConfig(hass) {
         const weatherEntity = hass ? Object.keys(hass.states).find(e => e.startsWith('weather.')) || '' : '';
@@ -3349,6 +3347,619 @@ void main(){
         return cfg.disable_background === true;
     }
 }
+/*
+ * VISUAL EDITOR
+ * Bundled with the card on purpose: the original stand-alone editor file was lost when the
+ * upstream repository was removed, and a single-file distribution cannot fail to be served.
+ */
+const EDITOR_NAME = 'atmospheric-weather-card-editor';
+const AWC_AREA_POSITIONS = ['top-left', 'top-center', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom-center', 'bottom-right'];
+const AWC_EDITOR_DEFAULTS = Object.freeze({ theme_adapt: true, sun_effects: true, night_sky_effects: true });
+const AWC_EDITOR_LABELS = Object.freeze({
+    _hide_label_unit: 'Hide label unit', _hide_sub_unit: 'Hide sub-value unit', _hide_unit: 'Hide unit',
+    bg_brightness: 'Background brightness', bg_saturation: 'Background saturation',
+    button_gap: 'Gap inside buttons', button_icon_background: 'Icon background',
+    button_text_gap: 'Label/value gap', columns: 'Grid columns', custom_cards: 'Embedded cards',
+    custom_cards_css_class: 'Embedded cards CSS class', element_order: 'Element order',
+    fancy_unit: 'Raised units', gap: 'Gap between buttons', gauge_attribute: 'Gauge attribute',
+    gauge_entity: 'Gauge entity', grouped: 'One shared background', hide: 'Hide this area',
+    icon_set: 'Icon set', inner_gap: 'Icon/text gap', layout: 'Layout', marquee_rtl: 'Scroll right to left',
+    name: 'Label', name_format: 'Label suffix', name_sensor: 'Label entity',
+    position_anchor: 'Anchor', scroll_count: 'Buttons visible at once', separator: 'Divider between buttons',
+    stack_direction: 'Stacking direction', style: 'Button style', sub_value_format: 'Sub-value unit',
+    text_order: 'Text order', text_shadow: 'Text shadow', type: 'Gauge type', unit_format: 'Custom unit',
+    visibility: 'Visibility conditions', weather_image_path_night: 'Weather image folder (night)',
+});
+const AWC_EDITOR_HELPERS = Object.freeze({
+    _hide_sub_unit: 'Renders the sub-value without any unit.',
+    _hide_unit: 'Renders the value without any unit.',
+    card_height: "In pixels, e.g. 200px. Use 'auto' for dashboard grid layouts.",
+    card_padding: 'Inner padding, e.g. 16px or 12px 20px.',
+    card_color_mode: 'Leave empty to follow the sun and theme entities.',
+    custom_cards: 'Lovelace cards embedded in the weather card, edited as YAML.',
+    custom_cards_position: 'e.g. bottom-right. Positions the embedded cards over the card.',
+    element_order: 'Comma separated, e.g. icon,text,bar.',
+    fancy_unit: 'Renders units smaller and raised, for the value and the sub-value.',
+    forecast_precision: 'Decimal places for forecast values.',
+    gauge_entity: 'Entity that drives the ring or bar. Defaults to the button entity.',
+    icon: "MDI icon, or type 'weather' for the dynamic weather icon.",
+    icon_path: 'Folder with your own icon images, e.g. /local/weather-icons/.',
+    icon_set: 'Built-in icons only. Colored uses the multi-colour set.',
+    image_scale: 'Image height as a percentage of the card height.',
+    name_sensor: "Use an entity's state as the label instead of fixed text.",
+    position: "Set to 'custom' to place the button freely over the card.",
+    scroll_count: 'Only used by the grid and scrolling layouts.',
+    status_entity: 'Shows a different image while this entity is active, open or home.',
+    sub_value_format: 'Overrides the sub-value unit. Tick "Hide sub-value unit" to remove it.',
+    text_order: 'Comma separated, e.g. label,value,sub.',
+    visibility: 'Home Assistant visibility conditions, as YAML.',
+    weather_image_path: 'Folder with weather background images, e.g. /local/weather/.',
+});
+const awcCountLabel = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+const awcTitleize = key => key.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+const awcComputeLabel = schema => (!schema || !schema.name) ? ''
+    : (AWC_EDITOR_LABELS[schema.name] || awcTitleize(schema.name));
+const awcComputeHelper = schema => (!schema || !schema.name) ? undefined : AWC_EDITOR_HELPERS[schema.name];
+const awcText = name => ({ name, selector: { text: {} } });
+const awcNumber = name => ({ name, selector: { number: { mode: 'box' } } });
+const awcBool = name => ({ name, selector: { boolean: {} } });
+const awcEntity = (name, domain) => ({ name, selector: { entity: domain ? { filter: { domain } } : {} } });
+const awcObject = name => ({ name, selector: { object: {} } });
+const awcAction = name => ({ name, selector: { ui_action: {} } });
+const awcSelect = (name, values) => ({
+    name,
+    selector: { select: { mode: 'dropdown', options: values.map(v => (typeof v === 'string' ? { value: v, label: awcTitleize(v) } : v)) } },
+});
+const awcGrid = (...schema) => ({ name: '', type: 'grid', schema });
+// Home Assistant only loads its form components once a card editor has been opened.
+async function awcEnsureEditorComponents() {
+    if (customElements.get('ha-form')) return true;
+    try {
+        const helpers = await window.loadCardHelpers();
+        const probe = await helpers.createCardElement({ type: 'entities', entities: [] });
+        if (probe && probe.constructor && probe.constructor.getConfigElement) await probe.constructor.getConfigElement();
+    } catch (err) {
+        console.warn(`${EDITOR_NAME}: could not preload the Home Assistant form components.`, err);
+    }
+    if (customElements.get('ha-form')) return true;
+    const timeout = new Promise(resolve => setTimeout(() => resolve(false), 5000));
+    return Promise.race([customElements.whenDefined('ha-form').then(() => true), timeout]);
+}
+const AWC_EDITOR_CSS = `
+    .editor { display: flex; flex-direction: column; gap: 12px; }
+    .panel { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 8px; background: var(--card-background-color, #fff); }
+    .panel > summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; font-weight: 500; list-style: none; }
+    .panel > summary::-webkit-details-marker { display: none; }
+    .panel > summary::before { content: '\\25B6'; font-size: 10px; color: var(--secondary-text-color); transition: transform 0.15s ease; }
+    .panel[open] > summary::before { transform: rotate(90deg); }
+    .panel-sub { color: var(--secondary-text-color); font-weight: 400; font-size: 13px; margin-inline-start: auto; }
+    .panel-body { display: flex; flex-direction: column; gap: 12px; padding: 4px 12px 14px; }
+    .panel .panel { background: var(--secondary-background-color, #f5f5f5); }
+    .group-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--secondary-text-color); margin-top: 4px; }
+    .toolbar { display: flex; gap: 6px; align-items: center; margin-inline-start: auto; }
+    .icon-btn { border: none; background: transparent; color: var(--secondary-text-color); cursor: pointer; border-radius: 50%; width: 28px; height: 28px; font-size: 15px; line-height: 1; }
+    .icon-btn:hover { background: var(--divider-color, #e0e0e0); color: var(--primary-text-color); }
+    .icon-btn.danger:hover { color: var(--error-color, #db4437); }
+    .icon-btn[disabled] { opacity: 0.3; cursor: default; background: transparent; }
+    .add-btn { align-self: flex-start; border: 1px solid var(--divider-color, #e0e0e0); background: transparent; color: var(--primary-color, #03a9f4); cursor: pointer; border-radius: 18px; padding: 6px 14px; font-size: 14px; }
+    .add-btn:hover { background: var(--divider-color, #e0e0e0); }
+    .threshold { display: flex; align-items: center; gap: 8px; }
+    .threshold ha-form { flex: 1; min-width: 0; }
+    .empty { color: var(--secondary-text-color); font-size: 13px; }
+    .notice { padding: 12px 16px; border-radius: 8px; line-height: 1.5; border: 1px solid var(--warning-color, #ffa726); }
+    ha-form { display: block; }
+`;
+class AtmosphericWeatherCardEditor extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this._forms = [];
+        this._headers = [];
+        this._open = new Set(['general']);
+        this._ready = false;
+    }
+    setConfig(config) {
+        // Home Assistant echoes the config back after every change, so the structure signature
+        // alone decides whether a rebuild is needed: forcing one here would steal input focus.
+        this._config = { ...(config || {}) };
+        if (this._ready) this._render();
+        else this._prepare();
+    }
+    set hass(hass) {
+        this._hass = hass;
+        for (const entry of this._forms) entry.node.hass = hass;
+    }
+    get hass() { return this._hass; }
+    async _prepare() {
+        if (this._preparing) return;
+        this._preparing = true;
+        this._ready = await awcEnsureEditorComponents();
+        this._preparing = false;
+        this._render();
+    }
+    _areas() { return Array.isArray(this._config.button_areas) ? this._config.button_areas : []; }
+    _buttons(area) { return Array.isArray(area && area.buttons) ? area.buttons : []; }
+    // Rebuilding the DOM on every keystroke would steal focus, so only structural changes rebuild.
+    _signature() {
+        return JSON.stringify(this._areas().map(area => this._buttons(area).map(button => [
+            (button && button.type) || '', (button && button.position) || '',
+            Array.isArray(button && button.ring_thresholds) ? button.ring_thresholds.length : 0,
+            Array.isArray(button && button.bar_thresholds) ? button.bar_thresholds.length : 0,
+            Array.isArray(button && button.color_thresholds) ? button.color_thresholds.length : 0,
+        ])));
+    }
+    _render() {
+        if (!this._config) return;
+        if (!this._ready) { this._renderUnavailable(); return; }
+        const sig = this._signature();
+        if (this._built && sig === this._structureSig) {
+            for (const entry of this._forms) entry.node.data = entry.read();
+            for (const entry of this._headers) {
+                const header = entry.read();
+                entry.title.textContent = header.title;
+                entry.sub.textContent = header.subtitle || '';
+            }
+            return;
+        }
+        this._structureSig = sig;
+        this._build();
+    }
+    _renderUnavailable() {
+        this.shadowRoot.innerHTML = `<style>${AWC_EDITOR_CSS}</style>
+            <div class="notice">
+                <b>Visual editor unavailable</b><br>
+                The Home Assistant form components could not be loaded. Use <b>Show code editor</b>
+                to configure this card in YAML.
+            </div>`;
+        this._built = false;
+    }
+    _build() {
+        this._forms = [];
+        this._headers = [];
+        this.shadowRoot.innerHTML = `<style>${AWC_EDITOR_CSS}</style>`;
+        const container = document.createElement('div');
+        container.className = 'editor';
+        for (const node of this._cardPanels()) container.appendChild(node);
+        container.appendChild(this._areasPanel());
+        this.shadowRoot.appendChild(container);
+        this._built = true;
+    }
+    _commit(next) {
+        this._config = awcCleanConfig(next);
+        this.dispatchEvent(new CustomEvent('config-changed', {
+            detail: { config: this._config }, bubbles: true, composed: true,
+        }));
+        this._render();
+    }
+    _patchCard(values) { this._commit({ ...this._config, ...values }); }
+    _patchArea(index, values) {
+        const areas = this._areas().map((area, i) => (i === index ? { ...area, ...values } : area));
+        this._commit({ ...this._config, button_areas: areas });
+    }
+    _patchButton(areaIndex, buttonIndex, values) {
+        const areas = this._areas().map((area, i) => {
+            if (i !== areaIndex) return area;
+            const buttons = this._buttons(area).map((button, j) => (j === buttonIndex ? { ...button, ...values } : button));
+            return { ...area, buttons };
+        });
+        this._commit({ ...this._config, button_areas: areas });
+    }
+    _replaceAreas(areas) { this._commit({ ...this._config, button_areas: areas }); }
+    _replaceButtons(areaIndex, buttons) {
+        const areas = this._areas().map((area, i) => (i === areaIndex ? { ...area, buttons } : area));
+        this._commit({ ...this._config, button_areas: areas });
+    }
+    _form(schema, read, write) {
+        const node = document.createElement('ha-form');
+        node.hass = this._hass;
+        node.schema = schema;
+        node.data = read();
+        node.computeLabel = awcComputeLabel;
+        node.computeHelper = awcComputeHelper;
+        node.addEventListener('value-changed', ev => {
+            ev.stopPropagation();
+            write({ ...((ev.detail && ev.detail.value) || {}) });
+        });
+        this._forms.push({ node, read });
+        return node;
+    }
+    _cardForm(schema) {
+        return this._form(schema, () => awcPick(this._config, schema), values => this._patchCard(values));
+    }
+    _panel(key, title, subtitle) {
+        const details = document.createElement('details');
+        details.className = 'panel';
+        details.open = this._open.has(key);
+        details.addEventListener('toggle', () => {
+            if (details.open) this._open.add(key); else this._open.delete(key);
+        });
+        const summary = document.createElement('summary');
+        const titleNode = document.createElement('span');
+        titleNode.className = 'panel-title';
+        titleNode.textContent = title;
+        const subNode = document.createElement('span');
+        subNode.className = 'panel-sub';
+        subNode.textContent = subtitle || '';
+        summary.append(titleNode, subNode);
+        details.appendChild(summary);
+        const body = document.createElement('div');
+        body.className = 'panel-body';
+        details.appendChild(body);
+        details._body = body;
+        details._summary = summary;
+        details._title = titleNode;
+        details._sub = subNode;
+        return details;
+    }
+    // Headers show live config values, so they must follow edits that do not rebuild the DOM.
+    _trackHeader(panel, read) {
+        this._headers.push({ title: panel._title, sub: panel._sub, read });
+    }
+    _toolbar(summary, { onUp, onDown, onRemove, canUp, canDown }) {
+        const bar = document.createElement('div');
+        bar.className = 'toolbar';
+        const add = (label, title, handler, enabled, danger) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `icon-btn${danger ? ' danger' : ''}`;
+            btn.title = title;
+            btn.setAttribute('aria-label', title);
+            btn.textContent = label;
+            btn.disabled = !enabled;
+            btn.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); handler(); });
+            bar.appendChild(btn);
+        };
+        add('\u2191', 'Move up', onUp, canUp);
+        add('\u2193', 'Move down', onDown, canDown);
+        add('\u2715', 'Delete', onRemove, true, true);
+        summary.appendChild(bar);
+    }
+    _addButton(label, handler) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'add-btn';
+        btn.textContent = label;
+        btn.addEventListener('click', ev => { ev.preventDefault(); handler(); });
+        return btn;
+    }
+    _groupTitle(text) {
+        const node = document.createElement('div');
+        node.className = 'group-title';
+        node.textContent = text;
+        return node;
+    }
+    _cardPanels() {
+        const general = this._panel('general', 'General');
+        general._body.append(
+            this._cardForm([
+                awcEntity('weather_entity', 'weather'),
+                awcGrid(awcEntity('sun_entity'), awcEntity('theme_entity')),
+                awcGrid(awcText('card_height'), awcText('card_padding')),
+                awcGrid(awcText('card_offset'), awcSelect('card_color_mode', ['light', 'dark', 'ha_theme'])),
+                awcBool('theme_adapt'),
+                awcAction('card_tap_action'),
+            ]),
+        );
+        const background = this._panel('background', 'Background & effects');
+        background._body.append(
+            this._cardForm([
+                awcGrid(awcBool('simple_background'), awcBool('disable_background')),
+                awcGrid(awcBool('sun_effects'), awcBool('night_sky_effects')),
+                awcGrid(awcBool('bottom_fade'), awcText('bg_brightness'), awcText('bg_saturation')),
+                awcText('weather_image_path'),
+                awcText('weather_image_path_night'),
+            ]),
+        );
+        const images = this._panel('images', 'Image & status');
+        images._body.append(
+            this._cardForm([
+                awcGrid(awcText('image_day'), awcText('image_night')),
+                awcGrid(awcNumber('image_scale'), awcSelect('image_alignment', AWC_AREA_POSITIONS)),
+                awcGrid(awcText('image_x'), awcText('image_y')),
+                awcEntity('status_entity'),
+                awcGrid(awcText('status_day'), awcText('status_night')),
+            ]),
+        );
+        const icons = this._panel('icons', 'Icons');
+        icons._body.append(
+            this._cardForm([
+                awcGrid(awcSelect('icon_set', ['default', 'colored']), awcText('icon_path')),
+            ]),
+        );
+        const embedded = this._panel('embedded', 'Embedded cards');
+        embedded._body.append(
+            this._cardForm([
+                awcGrid(awcText('custom_cards_position'), awcText('custom_cards_css_class')),
+                awcObject('custom_cards'),
+            ]),
+        );
+        return [general, background, images, icons, embedded];
+    }
+    _areasPanel() {
+        const areas = this._areas();
+        const panel = this._panel('areas', 'Button areas', awcCountLabel(areas.length, 'area'));
+        this._trackHeader(panel, () => ({ title: 'Button areas', subtitle: awcCountLabel(this._areas().length, 'area') }));
+        if (!areas.length) {
+            const empty = document.createElement('div');
+            empty.className = 'empty';
+            empty.textContent = 'No button areas yet. Add one to place buttons on the card.';
+            panel._body.appendChild(empty);
+        }
+        areas.forEach((area, index) => panel._body.appendChild(this._areaPanel(area, index, areas.length)));
+        panel._body.appendChild(this._addButton('+ Add area', () => {
+            this._open.add(`area-${this._areas().length}`);
+            this._replaceAreas([...this._areas(), { position: 'bottom-left', buttons: [] }]);
+        }));
+        return panel;
+    }
+    _areaPanel(area, index, total) {
+        const buttons = this._buttons(area);
+        const key = `area-${index}`;
+        const panel = this._panel(key, area.position || 'bottom-left', awcCountLabel(buttons.length, 'button'));
+        this._trackHeader(panel, () => {
+            const current = this._areas()[index] || {};
+            return { title: current.position || 'bottom-left', subtitle: awcCountLabel(this._buttons(current).length, 'button') };
+        });
+        this._toolbar(panel._summary, {
+            canUp: index > 0,
+            canDown: index < total - 1,
+            onUp: () => this._replaceAreas(awcMove(this._areas(), index, index - 1)),
+            onDown: () => this._replaceAreas(awcMove(this._areas(), index, index + 1)),
+            onRemove: () => this._replaceAreas(this._areas().filter((_, i) => i !== index)),
+        });
+        const areaForm = schema => this._form(
+            schema,
+            () => awcPick(this._areas()[index] || {}, schema),
+            values => this._patchArea(index, values),
+        );
+        panel._body.append(
+            areaForm([
+                awcGrid(awcSelect('position', AWC_AREA_POSITIONS), awcSelect('stack_direction', ['vertical', 'horizontal'])),
+                awcGrid(awcSelect('layout', ['wrap', 'grid', 'horizontal-scroll', 'vertical-scroll']), awcSelect('align', ['start', 'center', 'end', 'spread'])),
+                awcGrid(awcNumber('columns'), awcNumber('scroll_count')),
+                awcGrid(awcBool('hide'), awcBool('grouped'), awcBool('separator')),
+            ]),
+            this._groupTitle('Background'),
+            areaForm([
+                awcGrid(awcBool('background'), awcSelect('background_style', ['frosted', 'contrast', 'theme'])),
+                awcGrid(awcText('background_color'), awcText('button_background_color')),
+                awcGrid(awcBool('button_icon_background'), awcText('button_icon_background_color')),
+            ]),
+            this._groupTitle('Size & spacing'),
+            areaForm([
+                awcGrid(awcText('width'), awcText('height')),
+                awcGrid(awcText('padding'), awcText('button_padding')),
+                awcGrid(awcText('gap'), awcText('button_gap'), awcText('button_text_gap')),
+                awcGrid(awcText('button_icon_size'), awcText('button_icon_padding')),
+                awcGrid(awcText('button_text_size'), awcText('button_label_size')),
+                awcGrid(awcText('sub_value_size'), awcText('sub_value_weight')),
+                awcSelect('button_style', ['inline', 'stacked', 'vertical']),
+            ]),
+            this._groupTitle('Visibility'),
+            areaForm([awcObject('visibility')]),
+            this._groupTitle('Buttons'),
+        );
+        buttons.forEach((button, buttonIndex) => {
+            panel._body.appendChild(this._buttonPanel(button, index, buttonIndex, buttons.length));
+        });
+        panel._body.appendChild(this._addButton('+ Add button', () => {
+            this._open.add(`${key}-button-${this._currentButtons(index).length}`);
+            this._replaceButtons(index, [...this._currentButtons(index), { entity: this._config.weather_entity || '' }]);
+        }));
+        return panel;
+    }
+    _buttonPanel(button, areaIndex, buttonIndex, total) {
+        const key = `area-${areaIndex}-button-${buttonIndex}`;
+        const panel = this._panel(key, button.entity || `Button ${buttonIndex + 1}`, button.type ? button.type : '');
+        this._trackHeader(panel, () => {
+            const current = this._currentButtons(areaIndex)[buttonIndex] || {};
+            return { title: current.entity || `Button ${buttonIndex + 1}`, subtitle: current.type || '' };
+        });
+        this._toolbar(panel._summary, {
+            canUp: buttonIndex > 0,
+            canDown: buttonIndex < total - 1,
+            onUp: () => this._replaceButtons(areaIndex, awcMove(this._currentButtons(areaIndex), buttonIndex, buttonIndex - 1)),
+            onDown: () => this._replaceButtons(areaIndex, awcMove(this._currentButtons(areaIndex), buttonIndex, buttonIndex + 1)),
+            onRemove: () => this._replaceButtons(areaIndex, this._currentButtons(areaIndex).filter((_, i) => i !== buttonIndex)),
+        });
+        const buttonForm = schema => this._form(
+            schema,
+            () => awcPick(this._currentButtons(areaIndex)[buttonIndex] || {}, schema),
+            values => this._patchButton(areaIndex, buttonIndex, values),
+        );
+        panel._body.append(
+            buttonForm([
+                awcEntity('entity'),
+                awcGrid(awcText('attribute'), awcText('name')),
+                awcGrid(awcEntity('name_sensor'), awcText('name_attribute')),
+                awcGrid(awcSelect('forecast', ['daily', 'hourly']), awcNumber('forecast_precision')),
+                awcAction('tap_action'),
+            ]),
+            this._formatField(areaIndex, buttonIndex, 'unit_format', '_hide_unit'),
+            this._formatField(areaIndex, buttonIndex, 'name_format', '_hide_label_unit'),
+            this._groupTitle('Sub-value'),
+            buttonForm([
+                awcGrid(awcEntity('sub_value_entity'), awcText('sub_value_attribute')),
+                awcBool('fancy_unit'),
+            ]),
+            this._formatField(areaIndex, buttonIndex, 'sub_value_format', '_hide_sub_unit'),
+            this._groupTitle('Icon'),
+            buttonForm([
+                awcGrid({ name: 'icon', selector: { icon: {} } }, awcText('icon_path')),
+                awcGrid(awcText('icon_size'), awcText('icon_padding')),
+                awcGrid(awcBool('icon_background'), awcText('icon_background_color')),
+            ]),
+            this._groupTitle('Layout'),
+            buttonForm([
+                awcGrid(awcSelect('style', ['inline', 'stacked', 'vertical']), awcSelect('align', ['start', 'center', 'end'])),
+                awcGrid(awcBool('hide_icon'), awcBool('hide_label')),
+                awcGrid(awcBool('hide_value'), awcBool('hide_sub_value')),
+                awcGrid(awcText('width'), awcText('height'), awcText('padding')),
+                awcGrid(awcText('text_size'), awcText('label_size'), awcText('sub_value_size')),
+                awcGrid(awcText('value_weight'), awcText('label_weight'), awcText('sub_value_weight')),
+                awcGrid(awcText('inner_gap'), awcText('text_gap')),
+                awcGrid(awcBool('background'), awcText('background_color')),
+                awcGrid(awcBool('button_round'), awcBool('text_shadow')),
+                awcGrid(awcText('element_order'), awcText('text_order')),
+            ]),
+            this._groupTitle('Text overflow'),
+            buttonForm([
+                awcGrid(awcSelect('overflow', ['ellipsis', 'clip', 'wrap', 'marquee']), awcSelect('label_overflow', ['ellipsis', 'clip', 'wrap', 'marquee'])),
+                awcGrid(awcSelect('sub_value_overflow', ['ellipsis', 'clip', 'wrap', 'marquee']), awcNumber('marquee_speed')),
+                awcBool('marquee_rtl'),
+            ]),
+            this._groupTitle('Free positioning'),
+            buttonForm([
+                awcGrid(awcSelect('position', ['custom']), awcSelect('position_anchor', AWC_AREA_POSITIONS)),
+                awcGrid(awcText('position_x'), awcText('position_y')),
+            ]),
+            this._groupTitle('Gauge'),
+            buttonForm([
+                awcGrid(awcSelect('type', ['ring', 'bar']), awcEntity('gauge_entity')),
+                awcText('gauge_attribute'),
+            ]),
+        );
+        if (button.type === 'ring') {
+            panel._body.append(
+                buttonForm([
+                    awcGrid(awcNumber('ring_min'), awcNumber('ring_max')),
+                    awcGrid(awcText('ring_width'), awcText('ring_gap')),
+                    awcGrid(awcText('ring_color'), awcSelect('ring_threshold_mode', ['solid', 'gradient'])),
+                ]),
+                ...this._thresholdEditor('ring_thresholds', 'Ring thresholds', areaIndex, buttonIndex),
+            );
+        }
+        if (button.type === 'bar') {
+            panel._body.append(
+                buttonForm([
+                    awcGrid(awcNumber('bar_min'), awcNumber('bar_max')),
+                    awcGrid(awcText('bar_height'), awcText('bar_color')),
+                    awcSelect('bar_threshold_mode', ['solid', 'gradient']),
+                ]),
+                ...this._thresholdEditor('bar_thresholds', 'Bar thresholds', areaIndex, buttonIndex),
+            );
+        }
+        panel._body.append(
+            this._groupTitle('Colour thresholds'),
+            buttonForm([awcGrid(awcEntity('color_threshold_entity'), awcText('color_threshold_attribute'))]),
+            ...this._thresholdEditor('color_thresholds', '', areaIndex, buttonIndex),
+            this._groupTitle('Visibility'),
+            buttonForm([awcObject('visibility')]),
+        );
+        return panel;
+    }
+    _currentButtons(areaIndex) { return this._buttons(this._areas()[areaIndex]); }
+    // An empty format means "no unit at all", which is different from leaving the option unset.
+    _formatField(areaIndex, buttonIndex, key, toggleKey) {
+        return this._form(
+            [awcGrid(awcText(key), awcBool(toggleKey))],
+            () => {
+                const value = (this._currentButtons(areaIndex)[buttonIndex] || {})[key];
+                return { [key]: value === undefined ? '' : value, [toggleKey]: value === '' };
+            },
+            values => {
+                const current = (this._currentButtons(areaIndex)[buttonIndex] || {})[key];
+                const wasHidden = current === '';
+                const hidden = values[toggleKey] === true;
+                const text = values[key] === undefined ? '' : values[key];
+                // Whichever of the two controls the user just touched wins.
+                const next = hidden !== wasHidden
+                    ? (hidden ? '' : (text === '' ? undefined : text))
+                    : (text === '' ? (hidden ? '' : undefined) : text);
+                this._patchButton(areaIndex, buttonIndex, { [key]: next });
+            },
+        );
+    }
+    _thresholdList(areaIndex, buttonIndex, key) {
+        const button = this._currentButtons(areaIndex)[buttonIndex] || {};
+        return Array.isArray(button[key]) ? button[key] : [];
+    }
+    _thresholdEditor(key, title, areaIndex, buttonIndex) {
+        const nodes = [];
+        if (title) nodes.push(this._groupTitle(title));
+        const schema = [awcGrid(awcText('value'), awcText('color'))];
+        this._thresholdList(areaIndex, buttonIndex, key).forEach((_, rowIndex) => {
+            const row = document.createElement('div');
+            row.className = 'threshold';
+            row.appendChild(this._form(
+                schema,
+                () => {
+                    const entry = this._thresholdList(areaIndex, buttonIndex, key)[rowIndex] || {};
+                    return { value: entry.value === undefined ? '' : String(entry.value), color: entry.color || '' };
+                },
+                values => {
+                    const list = this._thresholdList(areaIndex, buttonIndex, key)
+                        .map((entry, i) => (i === rowIndex ? { ...entry, ...values } : entry));
+                    this._patchButton(areaIndex, buttonIndex, { [key]: list });
+                },
+            ));
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'icon-btn danger';
+            remove.title = 'Delete threshold';
+            remove.setAttribute('aria-label', 'Delete threshold');
+            remove.textContent = '\u2715';
+            remove.addEventListener('click', ev => {
+                ev.preventDefault();
+                const list = this._thresholdList(areaIndex, buttonIndex, key).filter((_, i) => i !== rowIndex);
+                this._patchButton(areaIndex, buttonIndex, { [key]: list });
+            });
+            row.appendChild(remove);
+            nodes.push(row);
+        });
+        nodes.push(this._addButton('+ Add threshold', () => {
+            const list = [...this._thresholdList(areaIndex, buttonIndex, key), { value: '0', color: '' }];
+            this._patchButton(areaIndex, buttonIndex, { [key]: list });
+        }));
+        return nodes;
+    }
+}
+function awcSchemaKeys(schema, out = []) {
+    for (const entry of schema) {
+        if (entry && Array.isArray(entry.schema)) awcSchemaKeys(entry.schema, out);
+        else if (entry && entry.name) out.push(entry.name);
+    }
+    return out;
+}
+function awcPick(source, schema) {
+    const data = {};
+    for (const key of awcSchemaKeys(schema)) {
+        const value = source ? source[key] : undefined;
+        data[key] = value === undefined && key in AWC_EDITOR_DEFAULTS ? AWC_EDITOR_DEFAULTS[key] : value;
+    }
+    return data;
+}
+function awcMove(list, from, to) {
+    const next = [...list];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    return next;
+}
+// The card treats these as "set but empty" (no unit, no separator), so '' must survive cleaning.
+const AWC_MEANINGFUL_EMPTY = Object.freeze(['unit_format', 'name_format', 'sub_value_format']);
+// Unknown keys are always preserved: only empty values and redundant defaults are dropped.
+function awcCleanConfig(config) {
+    const clean = source => {
+        const out = {};
+        for (const [key, value] of Object.entries(source)) {
+            if (value === '' && !AWC_MEANINGFUL_EMPTY.includes(key)) continue;
+            if (value === null || value === undefined) continue;
+            if (key in AWC_EDITOR_DEFAULTS && value === AWC_EDITOR_DEFAULTS[key]) continue;
+            out[key] = value;
+        }
+        return out;
+    };
+    const out = clean(config);
+    if (Array.isArray(config.button_areas)) {
+        out.button_areas = config.button_areas.map(area => {
+            const nextArea = clean(area || {});
+            nextArea.buttons = (Array.isArray(area && area.buttons) ? area.buttons : []).map(button => clean(button || {}));
+            return nextArea;
+        });
+    }
+    return out;
+}
+if (!customElements.get(EDITOR_NAME)) customElements.define(EDITOR_NAME, AtmosphericWeatherCardEditor);
 const CARD_NAME = 'atmospheric-weather-card';
 if (!customElements.get(CARD_NAME)) {
     customElements.define(CARD_NAME, AtmosphericWeatherCard); window.customCards = window.customCards || [];
