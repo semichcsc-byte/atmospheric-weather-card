@@ -30,6 +30,10 @@ without any network access.
 
 Lit 3.2.1 is included under its BSD-3-Clause licence (Copyright Google LLC).
 
+The recovered editor predates one option the card reads, `custom_cards_css_class`: it preserves
+the value untouched but has no field for it, so set that one in YAML. The untouched originals are
+archived in [`legacy/`](legacy/README.md).
+
 ## Usage
 
 ```yaml
