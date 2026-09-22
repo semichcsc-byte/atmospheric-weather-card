@@ -1,18 +1,9 @@
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
 const { test } = require('node:test');
-const vm = require('node:vm');
+const { createContext, source } = require('./sandbox.cjs');
 
 // Load the shipped card without a browser or Home Assistant installation.
-const source = readFileSync(require.resolve('../atmospheric-weather-card.js'), 'utf8');
-const elements = new Map();
-vm.runInNewContext(source, {
-    HTMLElement: class {},
-    customElements: { get: name => elements.get(name), define: (name, element) => elements.set(name, element) },
-    window: {},
-    console: { info() {} },
-});
-const Card = elements.get('atmospheric-weather-card');
+const Card = createContext().card;
 
 function fixture() {
     const card = Object.create(Card.prototype);

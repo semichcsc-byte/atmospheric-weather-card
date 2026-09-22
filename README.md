@@ -19,19 +19,16 @@ The card resource `atmospheric-weather-card.js` is registered automatically by H
 
 ## Visual editor
 
-The visual editor is **bundled inside `atmospheric-weather-card.js`**, so a HACS install of the
-single card file is always enough. It covers the full v5.0 option set: card, background and
-effects, image and status, icons, embedded cards, and the nested button areas (areas, buttons,
-ring/bar gauges, colour thresholds and visibility conditions). Options the editor does not
-recognise are preserved untouched, so YAML-only tweaks survive a visual edit.
+The card ships **the original visual editor written by shpongledsummer**, recovered from the
+upstream v5.0 release. It is bundled inside `atmospheric-weather-card.js` together with its Lit
+dependency, so a HACS install of the single card file is all that is needed and the editor works
+without any network access.
 
-> The original stand-alone `atmospheric-weather-card-editor.js` was lost when the upstream
-> repository was removed, which broke the card's editor with
-> `Failed to fetch dynamically imported module`. This editor is a clean reimplementation against
-> the v5.0 schema; there is no longer any external file to fetch.
+> The editor was originally a separate `atmospheric-weather-card-editor.js` that was never part of
+> this mirror, so the card failed with `Failed to fetch dynamically imported module`. It also
+> loaded Lit from a CDN at runtime. Bundling removes both failure modes.
 
-If Home Assistant's form components cannot be loaded, the editor shows a notice instead of an
-error and you can configure the card with **Show code editor**.
+Lit 3.2.1 is included under its BSD-3-Clause licence (Copyright Google LLC).
 
 ## Usage
 
