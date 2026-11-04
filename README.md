@@ -4,12 +4,35 @@ Animated weather card for Home Assistant.
 
 > **Community mirror.** The original repository (`shpongledsummer/atmospheric-weather-card`)
 > was removed from GitHub. This repository preserves the card (v5.0) so it can keep
-> being installed and updated via HACS. All credit for the card goes to the original
+> being installed and updated via the Home Assistant Marketplace or HACS. All credit for the card goes to the original
 > author, **shpongledsummer**. Distributed under the original MIT License (see
 > [`LICENSE`](LICENSE)). If you are the original author and want this taken down or
 > transferred, please open an issue.
 
-## Install (HACS)
+## Preview
+
+![Atmospheric Weather Card with an example weather entity](docs/images/preview.png)
+
+*Example data, rendered with the bundled card.*
+
+<!-- ha-marketplace:exclude-start -->
+## Install
+
+### Home Assistant Marketplace (2026.11 or newer)
+
+[![Open Atmospheric Weather Card in the Home Assistant Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=semichcsc-byte&repository=atmospheric-weather-card&category=plugin)
+
+Open the repository with the button above. If prompted, add it as a custom
+repository of type **Dashboard**, then install and reload your browser.
+Existing HACS installations migrate automatically; do not install a second copy.
+
+The Marketplace registers `atmospheric-weather-card.js` automatically as a
+JavaScript module. For YAML-managed resources, use the URL shown in the install
+dialog: `/local/community/atmospheric-weather-card/atmospheric-weather-card.js`.
+
+### HACS (Home Assistant 2026.10 and earlier)
+
+[Open this repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=semichcsc-byte&repository=atmospheric-weather-card&category=plugin).
 
 1. HACS → three-dot menu → **Custom repositories**.
 2. Add `semichcsc-byte/atmospheric-weather-card`, category **Dashboard**.
@@ -17,11 +40,13 @@ Animated weather card for Home Assistant.
 
 The card resource `atmospheric-weather-card.js` is registered automatically by HACS.
 
+<!-- ha-marketplace:exclude-end -->
+
 ## Visual editor
 
 The card ships **the original visual editor written by shpongledsummer**, recovered from the
 upstream v5.0 release. It is bundled inside `atmospheric-weather-card.js` together with its Lit
-dependency, so a HACS install of the single card file is all that is needed and the editor works
+dependency, so a Marketplace or HACS install of the single card file is all that is needed and the editor works
 without any network access.
 
 > The editor was originally a separate `atmospheric-weather-card-editor.js` that was never part of
