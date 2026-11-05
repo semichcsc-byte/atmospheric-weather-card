@@ -2,8 +2,8 @@
 "use strict";
 /**
  * ATMOSPHERIC WEATHER CARD
- * Version: 5.0
- * https://github.com/shpongledsummer/atmospheric-weather-card
+ * Version: 5.2.2
+ * https://github.com/semichcsc-byte/atmospheric-weather-card
  */
 console.info(
     "%c Atmospheric Weather Card ",
@@ -26,6 +26,10 @@ const FALLBACK_WEATHER = Object.freeze({
 });
 
 const _h = s => [parseInt(s.slice(1,3),16)/255, parseInt(s.slice(3,5),16)/255, parseInt(s.slice(5,7),16)/255];
+
+const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+})[char]);
 
 const SKY_HEX = {
     'sunny':           { day: ['#B0E8FF','#60B8FF','#4098F0','#3888E0'], night: ['#2E2480','#0F1247','#05081F','#000108'] },
@@ -1817,8 +1821,8 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
         if (showSubValue) {
             const hasSubFormat = button.sub_value_format !== undefined;
             const formatSubValue = (value, unit) => useFancyUnit && unit
-                ? `${value}<span class="fancy-unit">${unit}</span>`
-                : (hasSubFormat ? `${value}${unit}` : (unit ? `${value} ${unit}` : `${value}`));
+                ? `${escapeHtml(value)}<span class="fancy-unit">${escapeHtml(unit)}</span>`
+                : escapeHtml(hasSubFormat ? `${value}${unit}` : (unit ? `${value} ${unit}` : `${value}`));
             if (button.sub_value_entity) {
                 const svResolved = this._resolveSensorValue(hass, button.sub_value_entity, button.sub_value_attribute);
                 const attr = button.sub_value_attribute;
@@ -1832,11 +1836,11 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
                         const parts = attr ? toParts.call(hass, svResolved.sensor, attr) : toParts.call(hass, svResolved.sensor);
                         subValue = hasSubFormat
                             ? formatSubValue(parts.filter(p => p.type !== 'unit').map(p => p.value).join('').trim(), button.sub_value_format)
-                            : parts.map(p => p.type === 'unit' && p.value ? `<span class="fancy-unit">${p.value}</span>` : p.value).join('');
+                            : parts.map(p => p.type === 'unit' && p.value ? `<span class="fancy-unit">${escapeHtml(p.value)}</span>` : escapeHtml(p.value)).join('');
                     } else {
                         // Older HA versions cannot safely separate localized values and units.
                         // Keep the full display rather than losing precision or guessing a unit.
-                        subValue = String(svResolved.formatted);
+                        subValue = escapeHtml(svResolved.formatted);
                     }
                 } else {
                     let svUnit = hasSubFormat ? button.sub_value_format : svResolved.unit;
@@ -1874,7 +1878,7 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
             if (iconStrategy === 'native') {
                 inner = '<ha-state-icon></ha-state-icon>';
             } else if (iconStrategy === 'image') {
-                inner = `<img src="${iconValue}" class="custom-bottom-icon" />`;
+                inner = `<img src="${escapeHtml(iconValue)}" class="custom-bottom-icon" />`;
             } else if (iconStrategy === 'builtin') {
                 const useColored = (this._config && this._config.icon_set === 'colored');
                 const iconLib = useColored ? AWC_COLORED_ICONS : AWC_BUILTIN_ICONS;
@@ -1883,14 +1887,14 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
                     : 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"';
                 inner = `<svg class="awc-icon${useColored ? ' awc-colored' : ''}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" ${svgAttrs}>${iconLib[iconValue] || iconLib['default']}</svg>`;
             } else {
-                inner = `<ha-icon icon="${iconValue}"></ha-icon>`;
+                inner = `<ha-icon icon="${escapeHtml(iconValue)}"></ha-icon>`;
             }
             iconHtml = `<span class="button-icon">${inner}</span>`;
         }
         const nameHtml = showLabel && (name || isEnhanced)
             ? (isLabelMarquee
-                ? `<span class="button-name awc-marquee-host" data-speed="${marqueeSpeed}" data-rtl="${marqueeRtl ? 1 : 0}"><span class="awc-marquee-track"><span class="awc-marquee-text">${name}</span></span></span>`
-                : `<span class="button-name">${name}</span>`)
+                ? `<span class="button-name awc-marquee-host" data-speed="${marqueeSpeed}" data-rtl="${marqueeRtl ? 1 : 0}"><span class="awc-marquee-track"><span class="awc-marquee-text">${escapeHtml(name)}</span></span></span>`
+                : `<span class="button-name">${escapeHtml(name)}</span>`)
             : '';
         let inner;
         if (useFancyUnit) {
@@ -1902,13 +1906,14 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
                 if (!button.attribute || button.attribute === 'temperature') {
                     const rawTemp = isWeather ? sensor.attributes.temperature : (sensor && sensor.state);
                     const rawUnit = isWeather ? (sensor.attributes.temperature_unit || '') : (sensor && sensor.attributes && sensor.attributes.unit_of_measurement || '');
-                    fancyVal = (rawTemp != null && this._numFmt) ? this._numFmt.format(rawTemp) : (rawTemp != null ? rawTemp : formatted);
+                    const numericTemp = rawTemp != null && rawTemp !== '' && Number.isFinite(Number(rawTemp));
+                    fancyVal = (numericTemp && this._numFmt) ? this._numFmt.format(rawTemp) : (rawTemp != null ? rawTemp : formatted);
                     if (!hasUnitFormat) fancyUnitStr = rawUnit;
                 }
             }
-            inner = `${fancyVal}<span class="fancy-unit">${fancyUnitStr}</span>`;
+            inner = `${escapeHtml(fancyVal)}<span class="fancy-unit">${escapeHtml(fancyUnitStr)}</span>`;
         } else {
-            inner = hasUnitFormat ? `${formatted}${unit}` : (unit ? `${formatted} ${unit}` : `${formatted}`);
+            inner = escapeHtml(hasUnitFormat ? `${formatted}${unit}` : (unit ? `${formatted} ${unit}` : `${formatted}`));
         }
         let subBelowHtml = '';
         if (subValue) {
@@ -2026,7 +2031,7 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
             const fillStyles = [`--awc-bar-scale:${scale}`];
             if (g.barGradient) fillStyles.push(`--awc-bar-gradient:linear-gradient(to right, ${g.barGradient})`);
             else if (g.effectiveColor) fillStyles.push(`--awc-bar-color:${g.effectiveColor}`);
-            barHtml = `<div class="button-bar" style="--awc-bar-h:${barH}px"><div class="button-bar-track"></div><div class="button-bar-fill" data-bar-idx="${idx}" style="${fillStyles.join(';')}"></div></div>`;
+            barHtml = `<div class="button-bar" style="--awc-bar-h:${barH}px"><div class="button-bar-track"></div><div class="button-bar-fill" data-bar-idx="${idx}" style="${escapeHtml(fillStyles.join(';'))}"></div></div>`;
         }
         const buttonAlignClass = button.align || '';
         if (buttonAlignClass) classes.push(`align-${buttonAlignClass}`);
@@ -2070,10 +2075,10 @@ ${sel} > .button:nth-child(-n+${cols})::after { content: none; }`;
         const contentHtml = (nameHtmlOrdered || valHtmlOrdered || subHtmlOrdered) ? `<span class="button-content"${contentOrder}>${nameHtmlOrdered}${valHtmlOrdered}${subHtmlOrdered}</span>` : '';
         const iconHtmlOrdered = iconHtml && iconOrder ? iconHtml.replace('<span class="button-icon', `<span${iconOrder} class="button-icon`) : (iconHtml || '');
         const barHtmlOrdered = barHtml && barOrder ? barHtml.replace('class="button-bar" style="', `class="button-bar" style="order:${elOrder.indexOf('bar')};`) : (barHtml || '');
-        const style = inlineStyles.length ? ` style="${inlineStyles.join(';')}"` : '';
-        let buttonHtml = `<div class="${classes.join(' ')}" data-idx="${idx}" data-area="${areaIdx}"${style}>${loaderHtml}${iconHtmlOrdered}${contentHtml}${barHtmlOrdered}</div>`;
+        const style = inlineStyles.length ? ` style="${escapeHtml(inlineStyles.join(';'))}"` : '';
+        let buttonHtml = `<div class="${escapeHtml(classes.join(' '))}" data-idx="${idx}" data-area="${areaIdx}"${style}>${loaderHtml}${iconHtmlOrdered}${contentHtml}${barHtmlOrdered}</div>`;
         if (isRingType) {
-            buttonHtml = `<div class="button-ring-wrap${hasSegments ? ' has-segments' : ''}${fcLoading ? ' button-loading' : ''}" data-idx="${idx}" data-area="${areaIdx}" style="${ringWrapStyle}">${ringHtml}${buttonHtml}</div>`;
+            buttonHtml = `<div class="button-ring-wrap${hasSegments ? ' has-segments' : ''}${fcLoading ? ' button-loading' : ''}" data-idx="${idx}" data-area="${areaIdx}" style="${escapeHtml(ringWrapStyle)}">${ringHtml}${buttonHtml}</div>`;
         }
         const _n = (v) => v != null ? v : '';
         const sig = [idx, formatted, unit, iconValue, iconStrategy, showIcon, showLabel, showValue, overflowMode, labelOverflow, marqueeSpeed, marqueeRtl, width, height, nameSig, effectiveBg, bgStyle, effectiveFormat, _n(iconBg), isFree, posAnchor, posX, posY, effectiveBgColor, effectiveIconBgColor, _n(button.padding), button.text_size||'', button.label_size||'', button.inner_gap||'', button.text_gap||'', button.icon_size||'', button.icon_padding||'', buttonAlignClass, subValueSig, _n(button.sub_value_format), button.sub_value_size||'', button.sub_value_weight||'', button.sub_value_overflow||'', button.hide_sub_value||'', useFancyUnit, button.value_weight||'', button.label_weight||'', button.button_round||'', button.type||'', _n(button.ring_min), _n(button.ring_max), button.ring_color||'', button.ring_width||'', button.ring_gap||'', button.ring_threshold_mode||'', button._ringThresholdsSig||'', _n(button.bar_min), _n(button.bar_max), button.bar_color||'', button.bar_height||'', button.bar_threshold_mode||'', button._barThresholdsSig||'', gaugeSig, buttonTintColor, button.element_order||'', button.text_order||''].join('|');
@@ -2972,7 +2977,6 @@ uniform vec3 u_sky_top, u_sky_mid, u_sky_low, u_sky_base;
 uniform float u_ref_height;
 ${extraUniforms}
 ${this._glslClouds()}
-#define S(a,b,t) smoothstep(a,b,t)
 ${this._glslSkyRefract()}`;
     }
     _glslSkyRefract() {
@@ -2993,98 +2997,51 @@ vec3 skyRefract(vec2 rUV, float T) {
     return sky;
 }`;
     }
-    // Rain-on-glass remixed from "Heartfelt" https://www.shadertoy.com/view/ltffzl — CC BY-NC-SA 3.0.
+    // Original MIT-licensed rain: moving elliptical lenses with analytic surface normals.
     _glslFragWater() {
         return `${this._glslGlassPreamble('uniform float u_fx_speed, u_rain_intensity, u_lightning;')}
-vec3 N13(float p){
-    vec3 p3=fract(vec3(p)*vec3(.1031,.11369,.13787));
-    p3+=dot(p3,p3.yzx+19.19);
-    return fract(vec3((p3.x+p3.y)*p3.z,(p3.x+p3.z)*p3.y,(p3.y+p3.z)*p3.x));
+float rainSeed(vec2 cell) {
+    return fract(sin(dot(cell, vec2(73.23, 159.71))) * 18743.32);
 }
-float N(float t){return fract(sin(t*12345.564)*7658.76);}
-float Saw(float b,float t){return S(0.,b,t)*S(1.,b,t);}
-vec2 DropLayer2(vec2 uv,float t){
-    vec2 UV=uv;
-    uv.y+=t*0.75;
-    float gridScale = mix(0.95, 0.78, u_rain_intensity);
-    vec2 a=vec2(6.,1.) * gridScale;
-    vec2 grid=a*2.;
-    vec2 id=floor(uv*grid);
-    float colShift=N(id.x);
-    uv.y+=colShift;
-    id=floor(uv*grid);
-    vec3 n=N13(id.x*35.2+id.y*2376.1);
-    vec2 st=fract(uv*grid)-vec2(.5,0.);
-    float x=n.x-.5;
-    float y=UV.y*20.;
-    float wiggle=sin(y+sin(y));
-    x+=wiggle*(.5-abs(x))*(n.z-.5);
-    x*=.7;
-    float ti=fract(t+n.z);
-    y=(Saw(.85,ti)-.5)*.76+.5;
-    vec2 p=vec2(x,y);
-    float dropRadius = mix(0.44, 0.58, u_rain_intensity);
-    float d=length((st-p)*a.yx);
-    float mainDrop=S(dropRadius,.0,d);
-    float r=sqrt(S(1.,y,st.y));
-    float cd=abs(st.x-x);
-    float trail=S(.23*r,.15*r*r,cd);
-    float trailFront=S(-.02,.02,st.y-y);
-    trail*=trailFront*r*r;
-    y=UV.y;
-    float trail2=S(.2*r,.0,cd);
-    float droplets=max(0.,(sin(y*(1.-y)*120.)-st.y))*trail2*trailFront*n.z;
-    y=fract(y*10.)+(st.y-.5);
-    float dd=length(st-vec2(x,y));
-    droplets=S(.3,0.,dd);
-    float m=mainDrop+droplets*r*trailFront;
-    return vec2(m,trail);
-}
-float StaticDrops(vec2 uv,float t){
-    uv*=40.;
-    vec2 id=floor(uv);
-    uv=fract(uv)-.5;
-    vec3 n=N13(id.x*107.45+id.y*3543.654);
-    vec2 p=(n.xy-.5)*.7;
-    float d=length(uv-p);
-    float fade=Saw(.025,fract(t+n.z));
-    float c=S(.3,0.,d)*fract(n.z*10.)*fade;
-    return c;
-}
-vec2 Drops(vec2 uv,float t,float l0,float l1,float l2){
-    float s=StaticDrops(uv,t)*l0;
-    vec2 m1=DropLayer2(uv,t)*l1;
-    vec2 m2 = vec2(0.0);
-    if (l2 > 0.001) m2 = DropLayer2(uv*1.85,t)*l2;
-    float c=s+m1.x+m2.x;
-    c=S(.3,1.,c);
-    return vec2(c,max(m1.y*l0,m2.y*l1));
-}
-void main(){
-    vec2 UV = v_uv;
-    float T = u_time;
-    vec2 uv = (gl_FragCoord.xy - 0.5*u_resolution) / max(u_resolution.y, u_ref_height);
-    float t = T * 0.2 * u_fx_speed;
-
-    float sd = S(-.5,1.,u_rain_intensity)*2., l1 = S(.1,.75,u_rain_intensity), l2 = S(.2,.85,u_rain_intensity);
-    vec2 c = Drops(uv, t, sd, l1, l2);
-    vec2 e = vec2(.001, 0.);
-    vec2 n = vec2(Drops(uv+e,t,sd,l1,l2).x - c.x, Drops(uv+e.yx,t,sd,l1,l2).x - c.x);
-    vec2 rUV = UV + n * mix(6.0, 28.0, u_dark);
-    vec3 col = skyRefract(rUV, T);
-    if (u_lightning > 0.0) {
-        float s = sin(T * 0.79) + sin(T * 1.49) + sin(T * 0.52);  // quasi-periodic -> irregular timing
-        float strike = smoothstep(1.45, 2.35, s); strike *= strike; // sharp onset, fires more often
-        strike *= 0.7 + 0.3 * sin(T * 33.0 + s * 5.0);            // gentle flicker while lit
-        vec2 cellPos = vec2(0.50 + 0.34 * sin(T * 0.17 + 1.3), 0.70 + 0.12 * sin(T * 0.11 + 0.5));
-        float rad    = 0.52 + 0.16 * sin(T * 0.13 + 2.1);        // breathing size
-        float aspY   = 1.5 + 0.40 * sin(T * 0.09);
-        float blob = smoothstep(rad, 0.0, length((rUV - cellPos) * vec2(1.1, aspY)));
-        blob *= 0.55 + 0.45 * awc_fbm(rUV * 1.8 + T * 0.012);     // soft cloud shape
-        vec3 cellCol = mix(vec3(0.60, 0.72, 1.0), vec3(0.78, 0.85, 1.0), u_dark);
-        col += cellCol * u_lightning * strike * blob * 0.7;
+vec3 rainLenses(vec2 point, float clock, float density, float scale, float speed) {
+    vec2 grid = vec2(scale, scale * 0.55);
+    vec2 moving = point * grid + vec2(0.0, clock * speed);
+    vec2 cell = floor(moving);
+    vec2 local = fract(moving);
+    vec3 lens = vec3(0.0);
+    for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+            vec2 offset = vec2(float(x), float(y));
+            float seed = rainSeed(cell + offset);
+            float coverage = seed < density ? 1.0 : 0.0;
+            vec2 center = offset + vec2(
+                0.2 + 0.6 * rainSeed(cell + offset + 17.0),
+                0.2 + 0.6 * rainSeed(cell + offset + 39.0));
+            vec2 radius = vec2(0.09 + seed * 0.07, 0.07 + seed * 0.06);
+            vec2 delta = local - center;
+            vec2 q = delta / radius;
+            float dome = max(0.0, 1.0 - dot(q, q));
+            lens.xy += -4.0 * dome * delta / (radius * radius) * coverage / grid;
+            lens.z += dome * dome * coverage;
+        }
     }
-    col += min(c.y, 1.0) * mix(0.033, 0.055, u_dark);
+    return lens;
+}
+void main() {
+    float intensity = clamp(u_rain_intensity, 0.0, 1.0);
+    float clock = u_time * max(u_fx_speed, 0.0);
+    vec2 point = (gl_FragCoord.xy - u_resolution * 0.5) / max(u_resolution.y, u_ref_height);
+    vec3 lenses = rainLenses(point, clock, intensity, 25.0, 0.0);
+    lenses += rainLenses(point + vec2(2.7, 0.0), clock, intensity * 0.8, 12.0, 0.7);
+    lenses += rainLenses(point + vec2(5.1, 1.3), clock, intensity * intensity, 18.0, 1.2);
+    vec2 refracted = v_uv + lenses.xy * 0.16;
+    vec3 col = skyRefract(refracted, u_time);
+    float highlight = pow(max(0.0, dot(normalize(vec3(lenses.xy, 1.0)),
+        normalize(vec3(-0.4, 0.7, 1.0)))), 24.0);
+    col += min(lenses.z, 1.0) * (highlight * 0.18 - 0.025);
+    float storm = sin(u_time * 0.83) * sin(u_time * 1.37 + 2.0);
+    float flash = pow(max(0.0, storm), 18.0);
+    col += vec3(0.65, 0.75, 1.0) * flash * u_lightning * (0.4 + 0.6 * v_uv.y);
     fragColor = vec4(col, 1.0);
 }`;
     }
@@ -3372,7 +3329,7 @@ var O=globalThis,R=O.ShadowRoot&&(O.ShadyCSS===void 0||O.ShadyCSS.nativeShadow)&
 const { LitElement, html, css } = __awcLit;
 /**
  * ATMOSPHERIC WEATHER CARD — VISUAL EDITOR
- * https://github.com/shpongledsummer/atmospheric-weather-card
+ * https://github.com/semichcsc-byte/atmospheric-weather-card
  */
 
 const LABELS = Object.freeze({
@@ -9173,7 +9130,7 @@ class AtmosphericWeatherCardEditor extends LitElement {
                   >Set a folder path to use your own SVG weather icons instead
                   of the built-in set.
                   <a
-                    href="https://github.com/shpongledsummer/atmospheric-weather-card#weather-icons"
+                    href="https://github.com/semichcsc-byte/atmospheric-weather-card#weather-icons"
                     target="_blank"
                     rel="noopener"
                     style="color:var(--primary-color)"

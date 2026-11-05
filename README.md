@@ -45,7 +45,7 @@ The card resource `atmospheric-weather-card.js` is registered automatically by H
 ## Visual editor
 
 The card ships **the original visual editor written by shpongledsummer**, recovered from the
-upstream v5.0 release. It is bundled inside `atmospheric-weather-card.js` together with its Lit
+upstream v5.0 release, with links updated to this repository. It is bundled inside `atmospheric-weather-card.js` together with its Lit
 dependency, so a Marketplace or HACS install of the single card file is all that is needed and the editor works
 without any network access.
 
@@ -56,8 +56,9 @@ without any network access.
 Lit 3.2.1 is included under its BSD-3-Clause licence (Copyright Google LLC).
 
 The recovered editor predates one option the card reads, `custom_cards_css_class`: it preserves
-the value untouched but has no field for it, so set that one in YAML. The untouched originals are
-archived in [`legacy/`](legacy/README.md).
+the value untouched but has no field for it, so set that one in YAML. The original editor is
+archived in [`legacy/`](legacy/README.md). The archived card was removed because it contained
+a NonCommercial rain shader incompatible with MIT distribution.
 
 ## Usage
 
@@ -74,6 +75,18 @@ button_areas:
         attribute: temperature
         fancy_unit: true
 ```
+
+## Weather icons
+
+The card includes built-in weather icons; no download is required. Set a button's
+`icon: weather` to follow the current condition, and use `icon_set: colored` at card
+level for colored built-in icons.
+
+For your own icons, place SVG files in Home Assistant's `/config/www/weather-icons/`
+directory and set `icon_path: /local/weather-icons` with `icon: weather`. Name each
+file after its weather condition, such as `sunny.svg`, `rainy.svg`, or
+`partlycloudy.svg`. The card appends `.svg` when the icon name has no extension.
+Use trusted local files.
 
 ## Configuration
 
@@ -363,8 +376,23 @@ overrides are not applied in fancy mode because the unit cannot be safely separa
 
 Run the regression tests with Node.js 18 or newer: `node --test tests/*.test.cjs`.
 No dependencies are required. The suite also checks that every option documented below is one
+
+For browser regressions, serve the repository locally with
+`python3 -m http.server 8768 --bind 127.0.0.1`, open `http://127.0.0.1:8768/`,
+and run `await (await import('/tests/browser-check.mjs')).checkBrowser()` in the
+browser console. This verifies DOM text escaping and compiles and renders the rain
+shader in WebGL2 at mobile and desktop sizes, checking intensity, motion, speed
+and lightning. It leaves day/night previews on the page for visual inspection. The suite also checks that every option documented below is one
 the card actually reads, so the reference cannot drift from the code.
 
 ## License
+
+The maintained rain-on-glass effect is an original MIT-licensed implementation
+using moving elliptical lenses and analytic surface normals. It replaces the
+upstream shader derived from "Heartfelt" (CC BY-NC-SA 3.0), which is no longer
+included in the current source tree. Historical releases are not covered by this fix.
+
+Entity values, labels and configured units are displayed as text, not HTML.
+Fancy units and marquee layouts retain only the card's own markup.
 
 MIT © shpongledsummer (original author). See [`LICENSE`](LICENSE).

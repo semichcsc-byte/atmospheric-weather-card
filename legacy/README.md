@@ -1,13 +1,12 @@
-# Archived upstream v5.0 sources
+# Archived upstream v5.0 editor
 
-These are **untouched copies of the original files by shpongledsummer**, kept for provenance and
-as insurance. They are *not* what HACS installs — HACS only downloads the file named in
+This is an **untouched copy of the original editor by shpongledsummer**, kept for provenance and
+as insurance. It is *not* what HACS installs — HACS only downloads the file named in
 [`hacs.json`](../hacs.json), which is [`atmospheric-weather-card.js`](../atmospheric-weather-card.js)
 in the repository root.
 
 | File | Size | SHA-256 |
 |---|---|---|
-| `v5.0/atmospheric-weather-card.js` | 256,721 | `814d5b6cd5f2d0b37d71d2c582e399561630cf5394123b4d184b5d3459ac6646` |
 | `v5.0/atmospheric-weather-card-editor.js` | 198,211 | `f8a6789a4d88425a5feeb35bf919e89d23b4f773991af090ed50f5476d1b2386` |
 
 ## Where they came from
@@ -24,14 +23,15 @@ issue reporter independently found the same file in a Home Assistant backup, whi
 
 ## How they relate to the shipped card
 
-- **The editor is what this repository ships.** It is bundled into the card file — together with
+- **The editor is what this repository ships, with repository links updated.** It is bundled into the card file — together with
   Lit, so it no longer fetches anything at runtime — rather than being served as a separate file,
   because HACS never installed that second file. That was the cause of
   `Failed to fetch dynamically imported module` (see issue #1).
-- **The card here is a slightly earlier v5.0 build** than the one this repository distributes.
-  Both carry the `AWC-28062026` token, but the shipped card reads `custom_cards_css_class`, which
-  this build and the editor predate. The editor preserves that option untouched; it simply has no
-  field for it.
+- The archived card was removed because it contained a rain shader under CC BY-NC-SA 3.0,
+  incompatible with this repository's MIT distribution. The maintained card uses a new,
+  independently implemented MIT-licensed rain shader; no copy of the old shader is shipped.
+- The shipped card reads `custom_cards_css_class`, which the editor predates. The editor
+  preserves that option untouched; it simply has no field for it.
 
 ## Other surviving upstream material
 
